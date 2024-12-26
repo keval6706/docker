@@ -1,0 +1,163 @@
+services:
+  redis:
+    image: redis:7.4
+    ports:
+      - '6379:6379'
+    volumes:
+      - redis-data:/data
+    networks:
+      - app-network
+    restart: unless-stopped
+    # command: redis-server --appendonly yes
+    command: >
+      redis-server
+      --supervised systemd
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  postgres:
+    image: postgres:17
+    ports:
+      - '5432:5432'
+    environment:
+      - POSTGRES_DB=${DB_DATABASE}
+      - POSTGRES_USER=${DB_USERNAME}
+      - POSTGRES_PASSWORD=${DB_PASSWORD}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - app-network
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.17.0
+    container_name: elasticsearch
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=true
+      - xpack.security.http.ssl.enabled=false
+      - xpack.security.enrollment.enabled=false
+      - xpack.security.authc.api_key.enabled=true
+      - ELASTIC_PASSWORD=${ELASTICSEARCH_PASSWORD}
+      - ELASTIC_USERNAME=${ELASTICSEARCH_USERNAME}
+      - KIBANA_SYSTEM_PASSWORD=${ELASTICSEARCH_PASSWORD}
+      - KIBANA_PASSWORD=${ELASTICSEARCH_PASSWORD}
+      # - ES_JAVA_OPTS="-XX:UseSSE=2"
+      # - ulimit -c unlimited
+      - ES_JAVA_OPTS=-XX:UseSVE=0
+      - CLI_JAVA_OPTS=-XX:UseSVE=0
+    deploy:
+      resources:
+        limits:
+          memory: 1g 
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    volumes:
+      - elasticsearch-data:/usr/share/elasticsearch/data
+      # - ./scripts:/scripts
+    ports:
+      - '9200:9200'
+      - '9300:9300'
+    networks:
+      - app-network
+    healthcheck:
+      test:
+        [
+          'CMD-SHELL',
+          'curl -s http://localhost:9200/_cluster/health | grep -vq ''"status":"red"''',
+        ]
+      interval: 20s
+      timeout: 10s
+      retries: 5
+    restart: unless-stopped
+    # command: >
+    #   bash -c "chmod +x /scripts/script.sh &&
+    #   ./scripts/script.sh &&
+    #   echo 'Script completed'"
+    command: >
+      /bin/bash -c "
+        /usr/local/bin/docker-entrypoint.sh eswrapper &
+        echo 'Waiting for Elasticsearch to start...' &&
+        until curl -s -u ${ELASTICSEARCH_USERNAME}:${ELASTICSEARCH_PASSWORD} http://localhost:9200 >/dev/null; do
+          sleep 1
+        done &&
+        echo 'Setting up kibana_system user...' &&
+        curl -X POST -u ${ELASTICSEARCH_USERNAME}:${ELASTICSEARCH_PASSWORD} 'http://localhost:9200/_security/user/kibana_system/_password' -H 'Content-Type: application/json' -d '{\"password\":\"${ELASTICSEARCH_PASSWORD}\"}' &&
+        echo 'Setup complete.' &&
+        wait
+      "
+
+  enterprise-search:
+    image: docker.elastic.co/enterprise-search/enterprise-search:8.17.0
+    environment:
+      - ENT_SEARCH_AUTH_SOURCE=standard
+      - ENT_SEARCH_DEFAULT_PASSWORD=${ELASTICSEARCH_PASSWORD}
+      - ENT_SEARCH_DEFAULT_USERNAME=${ELASTICSEARCH_USERNAME}
+      - elasticsearch.username=${ELASTICSEARCH_USERNAME}
+      - elasticsearch.password=${ELASTICSEARCH_PASSWORD}
+      - elasticsearch.host=http://elasticsearch:9200
+      - allow_es_settings_modification=true
+      - elasticsearch.ssl.enabled=false
+      - kibana.external_url=http://kibana:5601
+      - ent_search.external_url=http://localhost:3002
+      - JAVA_OPTS=-Xms2g -Xmx2g
+      - secret_management.encryption_keys=[${ENCRYPTION_KEY}]  # Modified this line to make it an array
+    ports:
+      - 3002:3002
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    networks:
+      - app-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3002"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    restart: unless-stopped
+
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.17.0
+    container_name: kibana
+    environment:
+      - SERVERNAME=kibana
+      - enterpriseSearch.host=http://localhost:3002
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+      - ELASTICSEARCH_USERNAME=kibana_system
+      - ELASTICSEARCH_PASSWORD=${ELASTICSEARCH_PASSWORD}
+      - ELASTICSEARCH_SSL_VERIFICATIONMODE=none
+      - XPACK_ENCRYPTEDSAVEDOBJECTS_ENCRYPTIONKEY=${KIBANA_ENCRYPTION_KEY}
+      - XPACK_REPORTING_ENCRYPTIONKEY=${KIBANA_ENCRYPTION_KEY}
+      - XPACK_SECURITY_ENCRYPTIONKEY=${KIBANA_ENCRYPTION_KEY}
+    ports:
+      - '5601:5601'
+    networks:
+      - app-network
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s -u kibana_system:${ELASTICSEARCH_PASSWORD} http://localhost:5601/api/status | grep -q 'Looking good'"]
+      interval: 20s
+      timeout: 10s
+      retries: 5
+    restart: unless-stopped
+
+networks:
+  app-network:
+    name: app-network
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.enable_icc: "true"
+
+volumes:
+  redis-data:
+    driver: local
+  postgres-data:
+    driver: local
+  elasticsearch-data:
+    driver: local
