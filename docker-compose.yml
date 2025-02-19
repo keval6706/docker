@@ -1,12 +1,15 @@
 services:
   redis:
-    image: redis:7.4
+    image: redis:6.2.17
+    # image: redis:7.4
     ports:
       - '6379:6379'
     volumes:
       - redis-data:/data
     networks:
       - app-network
+    # environment:
+    #   - REDIS_REPLICATION_MODE=master
     restart: unless-stopped
     # command: redis-server --appendonly yes
     command: >
@@ -146,6 +149,13 @@ services:
       timeout: 10s
       retries: 5
     restart: unless-stopped
+
+  # mailhog:
+  #   image: mailhog/mailhog:latest
+  #   restart: always
+  #   ports:
+  #     - 1025:1025
+  #     - 8025:8025
 
 networks:
   app-network:
