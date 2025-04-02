@@ -157,6 +157,27 @@ services:
   #     - 1025:1025
   #     - 8025:8025
 
+  mysql:
+    image: mysql:8.0
+    container_name: mysql
+    restart: unless-stopped
+    ports:
+      - '3306:3306'
+    environment:
+      - MYSQL_DATABASE=${MYSQL_DATABASE}
+      - MYSQL_USER=${MYSQL_USER}
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD}
+      - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD}
+    volumes:
+      - mysql-data:/var/lib/mysql
+    networks:
+      - app-network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 20s
+      timeout: 10s
+      retries: 5
+
 networks:
   app-network:
     name: app-network
@@ -170,4 +191,6 @@ volumes:
   postgres-data:
     driver: local
   elasticsearch-data:
+    driver: local
+  mysql-data:
     driver: local
