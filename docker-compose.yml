@@ -157,6 +157,25 @@ services:
   #     - 1025:1025
   #     - 8025:8025
 
+  mongodb:
+    image: mongo:8.0
+    container_name: mongodb
+    restart: unless-stopped
+    ports:
+      - '27017:27017'
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=${MONGO_INITDB_ROOT_USERNAME}
+      - MONGO_INITDB_ROOT_PASSWORD=${MONGO_INITDB_ROOT_PASSWORD}
+    volumes:
+      - mongodb-data:/data/db
+    networks:
+      - app-network
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 20s
+      timeout: 10s
+      retries: 5
+
   # mysql:
   #   image: mysql:8.0
   #   container_name: mysql
@@ -191,6 +210,8 @@ volumes:
   postgres-data:
     driver: local
   elasticsearch-data:
+    driver: local
+  mongodb-data:
     driver: local
   # mysql-data:
   #   driver: local
